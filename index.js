@@ -4,6 +4,27 @@ const merge  = require('deepmerge');
 const _debug = console.info.bind(console);
 const _log   = console.error.bind(console);
 
+
+class DataInterface {
+  constructor() {
+    if(!this.insert) {
+      throw new Error("must have Insert!");
+    }
+    if(!this.findPending) {
+      throw new Error("must have findPending!");
+    }
+    if(!this.find) {
+      throw new Error("must have find!");
+    }
+    if(!this.update) {
+      throw new Error("must have update!");
+    }
+    if(!this.delete) {
+      throw new Error("must have delete!");
+    }
+  }
+}
+
 const mongoErrorHandler = (error) => {
   if (error) {
     console.trace();
@@ -578,27 +599,7 @@ module.exports = class MailTime {
   }
 };
 
-module.exports.dataInterface = class DataInterface {
-  constructor() {
-    if(!this.insert) {
-      throw new Error("must have Insert!");
-    }
-    if(!this.findPending) {
-      throw new Error("must have findPending!");
-    }
-    if(!this.find) {
-      throw new Error("must have find!");
-    }
-    if(!this.update) {
-      throw new Error("must have update!");
-    }
-    if(!this.delete) {
-      throw new Error("must have delete!");
-    }
-  }
-}
-
-module.exports.MongoHandler = class MongoHandler extends dataInterface {
+class MongoHandler extends DataInterface {
 
   constructor(mongoConnection, interval, maxtries) {
     super();
@@ -617,7 +618,7 @@ module.exports.MongoHandler = class MongoHandler extends dataInterface {
     });
   }
 
-  findPending = (callback) => {
+  findPending(callback) {
     this.collection.findOneAndUpdate({
       $or: [{
         isSent: false,
@@ -657,27 +658,27 @@ module.exports.MongoHandler = class MongoHandler extends dataInterface {
     }, callback)
   }
 
-  find = (obj, callback) => {
+  find (obj, callback) {
     this.collection.findOne(obj, callback)
 
   }
 
-  insert = (obj, callback) => {
+  insert (obj, callback) {
     this.collection.insertOne(obj, callback)
   }
 
-  update = (where, values, callback) => {
+  update (where, values, callback) {
     this.collection.updateOne(where, { $set: values }, callback);
   }
 
-  deleteOne = (where) =>{
+  deleteOne (where) {
     this.collection.deleteOne(where, callback);
   }
 
 }
 
 
-module.exports.SequelizeHandler = class SequelizeHandler extends dataInterface {
+class SequelizeHandler extends DataInterface {
 
   constructor(sequelizeModel, interval, maxtries) {
     super();
@@ -686,8 +687,8 @@ module.exports.SequelizeHandler = class SequelizeHandler extends dataInterface {
     this.model = sequelizeModel;
   }
 
-  //remaking this one  
-  findPending = (callback) => {
+  // remaking this one  
+  findPending (callback) {
     this.model.findOne({ where : {
       [this.model.sequelize.Operator.or]: [{
         isSent: false,
@@ -723,20 +724,24 @@ module.exports.SequelizeHandler = class SequelizeHandler extends dataInterface {
       })
   }
 
-  find = (who, callback) => {
+  find (who, callback) {
     this.model.findOne( { where: who } ).then(callback)
   }
 
-  insert = (obj, callback) => {
+  insert (obj, callback) {
     this.model.create(obj).then(callback)
   }
 
-  update = (where, value, callback) => {
+  update (where, value, callback) {
     this.model.update(value, where).then(callback);
   }
 
-  deleteOne = (who, callback) => {
+  deleteOne (who, callback) {
     this.model.destroy( { where: who } ).then(callback)
   }
 
 }
+
+module.exports.DataInterface = DataInterface
+module.exports.SequelizeHandler = SequelizeHandler
+module.exports.MongoHandler = MongoHandler

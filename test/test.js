@@ -2,7 +2,7 @@ if (!process.env.MONGO_URL) {
   throw new Error('MONGO_URL env.var is not defined! Please run test with MONGO_URL, like `MONGO_URL=mongodb://127.0.0.1:27017/dbname npm test`');
 }
 
-const MailTime        = require('mail-time');
+const MailTime        = require('../index');
 const nodemailer      = require('nodemailer');
 const MongoClient     = require('mongodb').MongoClient;
 const directTransport = require('nodemailer-direct-transport');
