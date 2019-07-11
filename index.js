@@ -93,7 +93,7 @@ module.exports = class MailTime {
     }
 
     if (!opts.db) {
-      throw new Error('[mail-time] MongoDB database {db} option is required, like returned from `MongoClient.connect`');
+      throw new Error('[mail-time] Handler or MongoDB database {db} option is required, like returned from `MongoClient.connect`');
     }
 
     this.callbacks   = {};
@@ -154,17 +154,13 @@ module.exports = class MailTime {
       throw new Error('[mail-time] transports is required and must be an Array, like returned from `nodemailer.createTransport`');
     }
 
-    this.collection = opts.db.collection('__mailTimeQueue__' + this.prefix);
-    this.collection.createIndex({to: 1, isSent: 1}, (indexError) => {
-      if (indexError) {
-        _log('[mail-time] [createIndex]', indexError);
-      }
-    });
-    this.collection.createIndex({sendAt: 1, isSent: 1, tries: 1}, {background: true}, (indexError) => {
-      if (indexError) {
-        _log('[mail-time] [createIndex]', indexError);
-      }
-    });
+    if (opts.db instanceof DataInterface){
+      this.dataHandler = opts.db
+    }else{
+      _log('[mail-time] [dbinit]', 'this is not a DataInterface trying to generate a MongoDB one with it');
+      this.dataHandler = new DataInterface(opts.db)
+    }
+    
     // Schema:
     // _id
     // to          {String|[String]}
@@ -264,43 +260,7 @@ module.exports = class MailTime {
    @returns {void}
    */
   ___send(ready) {
-    this.collection.findOneAndUpdate({
-      $or: [{
-        isSent: false,
-        sendAt: {
-          $lte: new Date()
-        },
-        tries: {
-          $lt: this.maxTries
-        }
-      }, {
-        isSent: true,
-        sendAt: {
-          $lt: new Date(Date.now() - (this.interval * 4))
-        },
-        tries: {
-          $lt: this.maxTries
-        }
-      }]
-    }, {
-      $set: {
-        isSent: true,
-        sendAt: new Date(Date.now() + this.interval)
-      },
-      $inc: {
-        tries: 1
-      }
-    }, {
-      returnOriginal: false,
-      projection: {
-        _id: 1,
-        tries: 1,
-        template: 1,
-        transport: 1,
-        mailOptions: 1,
-        concatSubject: 1
-      }
-    }, (findUpdateError, result) => {
+    this.dataHandler.findPending( (findUpdateError, result) => {
       process.nextTick(() => {
         ready();
       });
@@ -348,7 +308,7 @@ module.exports = class MailTime {
               return;
             }
 
-            this.collection.deleteOne({
+            this.dataHandler.deleteOne({
               _id: task._id
             }, () => {
               if (this.debug === true) {
@@ -427,15 +387,11 @@ module.exports = class MailTime {
     }
 
     if (this.concatEmails) {
-      this.collection.findOne({
+      this.dataHandler.findOne({
         to: opts.to,
         isSent: false
-      }, {
-        projection: {
-          _id: 1,
-          mailOptions: 1
-        }
-      }, (findError, task) => {
+      },
+       (findError, task) => {
         if (findError) {
           if (this.debug === true) {
             _log('[mail-time] something went wrong, can\'t send email to: ', opts.mailOptions[0].to, findError);
@@ -455,13 +411,13 @@ module.exports = class MailTime {
 
           queue.push(opts);
 
-          this.collection.updateOne({
+          this.dataHandler.updateOne({
             _id: task._id
-          }, {
-            $set: {
-              mailOptions: queue
-            }
-          }, (updateError) => {
+          }, 
+          {
+            mailOptions: queue
+          }
+          , (updateError) => {
             if (updateError) {
               if (this.debug === true) {
                 _log('[mail-time] something went wrong, can\'t send email to: ', task.mailOptions[0].to, updateError);
@@ -510,7 +466,7 @@ module.exports = class MailTime {
     }
 
     if (task.tries > this.maxTries) {
-      this.collection.deleteOne({
+      this.dataHandler.deleteOne({
         _id: task._id
       }, () => {
         if (this.debug === true) {
@@ -535,13 +491,12 @@ module.exports = class MailTime {
         }
       }
 
-      this.collection.updateOne({
+      this.dataHandler.update({
         _id: task._id
-      }, {
-        $set: {
-          isSent: false,
-          transport: transportIndex
-        }
+      },
+      {
+        isSent: false,
+        transport: transportIndex
       }, mongoErrorHandler);
 
       if (this.debug === true) {
@@ -574,7 +529,7 @@ module.exports = class MailTime {
       task.to = opts.mailOptions.to;
     }
 
-    this.collection.insertOne(task, (insertError, r) => {
+    this.dataHandler.insert(task, (insertError, r) => {
       if (insertError) {
         if (this.debug === true) {
           _log('[mail-time] something went wrong, can\'t send email to: ', opts.mailOptions[0].to, insertError);
@@ -622,3 +577,166 @@ module.exports = class MailTime {
     return string;
   }
 };
+
+module.exports.dataInterface = class DataInterface {
+  constructor() {
+    if(!this.insert) {
+      throw new Error("must have Insert!");
+    }
+    if(!this.findPending) {
+      throw new Error("must have findPending!");
+    }
+    if(!this.find) {
+      throw new Error("must have find!");
+    }
+    if(!this.update) {
+      throw new Error("must have update!");
+    }
+    if(!this.delete) {
+      throw new Error("must have delete!");
+    }
+  }
+}
+
+module.exports.MongoHandler = class MongoHandler extends dataInterface {
+
+  constructor(mongoConnection, interval, maxtries) {
+    super();
+    this.interval = interval;
+    this.maxtries = maxtries;
+    this.collection = mongoConnection.collection('__mailTimeQueue__' + this.prefix);
+    this.collection.createIndex({to: 1, isSent: 1}, (indexError) => {
+      if (indexError) {
+        _log('[mail-time] [createIndex]', indexError);
+      }
+    });
+    this.collection.createIndex({sendAt: 1, isSent: 1, tries: 1}, {background: true}, (indexError) => {
+      if (indexError) {
+        _log('[mail-time] [createIndex]', indexError);
+      }
+    });
+  }
+
+  findPending = (callback) => {
+    this.collection.findOneAndUpdate({
+      $or: [{
+        isSent: false,
+        sendAt: {
+          $lte: new Date()
+        },
+        tries: {
+          $lt: this.maxTries
+        }
+      }, {
+        isSent: true,
+        sendAt: {
+          $lt: new Date(Date.now() - (this.interval * 4))
+        },
+        tries: {
+          $lt: this.maxTries
+        }
+      }]
+    }, {
+      $set: {
+        isSent: true,
+        sendAt: new Date(Date.now() + this.interval)
+      },
+      $inc: {
+        tries: 1
+      }
+    }, {
+      returnOriginal: false,
+      projection: {
+        _id: 1,
+        tries: 1,
+        template: 1,
+        transport: 1,
+        mailOptions: 1,
+        concatSubject: 1
+      }
+    }, callback)
+  }
+
+  find = (obj, callback) => {
+    this.collection.findOne(obj, callback)
+
+  }
+
+  insert = (obj, callback) => {
+    this.collection.insertOne(obj, callback)
+  }
+
+  update = (where, values, callback) => {
+    this.collection.updateOne(where, { $set: values }, callback);
+  }
+
+  deleteOne = (where) =>{
+    this.collection.deleteOne(where, callback);
+  }
+
+}
+
+
+module.exports.SequelizeHandler = class SequelizeHandler extends dataInterface {
+
+  constructor(sequelizeModel, interval, maxtries) {
+    super();
+    this.interval = interval;
+    this.maxtries = maxtries;
+    this.model = sequelizeModel;
+  }
+
+  //remaking this one  
+  findPending = (callback) => {
+    this.model.findOne({ where : {
+      [this.model.sequelize.Operator.or]: [{
+        isSent: false,
+        sendAt: {
+          [this.model.sequelize.Operator.lte]: new Date()
+        },
+        tries: {
+          [this.model.sequelize.Operator.lte]: this.maxTries
+        }
+      }, {
+        isSent: true,
+        sendAt: {
+          [this.model.sequelize.Operator.lte]: new Date(Date.now() - (this.interval * 4))
+        },
+        tries: {
+          [this.model.sequelize.Operator.lte]: this.maxTries
+        }
+      }]
+    }}).then(mail => {
+        return mail.increment('tries', {by: 1})
+      }).then(mail => {
+        mail.update(
+          {
+            isSent: true,
+            sendAt: new Date(Date.now() + this.interval)
+          },
+          {returning: true}
+        ).then(() => {
+          callback(null, mail)
+        }).catch(error =>{
+          callback(error, null)
+        })
+      })
+  }
+
+  find = (who, callback) => {
+    this.model.findOne( { where: who } ).then(callback)
+  }
+
+  insert = (obj, callback) => {
+    this.model.create(obj).then(callback)
+  }
+
+  update = (where, value, callback) => {
+    this.model.update(value, where).then(callback);
+  }
+
+  deleteOne = (who, callback) => {
+    this.model.destroy( { where: who } ).then(callback)
+  }
+
+}
