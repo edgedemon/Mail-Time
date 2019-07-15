@@ -19,7 +19,7 @@ class DataInterface {
     if(!this.update) {
       throw new Error("must have update!");
     }
-    if(!this.delete) {
+    if(!this.deleteOne) {
       throw new Error("must have delete!");
     }
   }
